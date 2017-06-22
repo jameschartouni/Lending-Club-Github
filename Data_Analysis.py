@@ -22,6 +22,7 @@ from sklearn.ensemble import AdaBoostClassifier, GradientBoostingClassifier, Vot
 from sklearn.tree import DecisionTreeClassifier
 import xgboost as xgb
 from xgboost.sklearn import XGBClassifier
+from xgboost import plot_importance
 from sklearn.model_selection import GridSearchCV   #Perforing grid search
 #classification benchmarking
 from sklearn.metrics import mean_squared_error,confusion_matrix
@@ -68,6 +69,18 @@ def RandomForestCLF():
 	print("RF Cross Val Accuracy: %0.2f (+/- %0.2f)" % (scores.mean(), scores.std() * 2))
 	return clf 
 
+def tune_RF():
+	clf = RandomForestClassifier(random_state=30)
+	param_grid = { "n_estimators"      : [250, 300],
+	           "criterion"         : ["gini", "entropy"],
+	           "max_features"      : [3, 5],
+	           "max_depth"         : [10, 50],
+	           "min_samples_split" : [2, 4] ,
+	           "bootstrap": [True, False]}
+	grid_search = GridSearchCV(clf, param_grid, n_jobs=-1, cv=3, scoring=rmspe)
+	grid_search.fit(X_train, y_train)
+	print(grid_search.best_params_)
+
 class Never_Default_Classifier(BaseEstimator):
 	def fit(self, X, y=None):
 		pass
@@ -102,6 +115,28 @@ def confusion_matrix_implemented(clf):
 	print("precision score: " + str(precision_score(y_test, test_predictions, average="weighted")))
 	print("recall_score: " + str(recall_score(y_test, test_predictions, average="weighted")))
 	print("f1 score: " + str(f1_score(y_test, test_predictions, average="weighted")))
+
+#benchmarks the classification algo
+def confusion_matrix_implemented_binary(clf):
+	test_predictions = cross_val_predict(clf, X_test_2,y_test_2,cv=5)
+
+	#confusion matrix 
+	conf_mx = confusion_matrix(y_test_2,test_predictions)
+	print(conf_mx)
+	plt.matshow(conf_mx, cmap=plt.cm.gray)
+	plt.show()
+
+	#confusion matrix erros graph 
+	row_sums = conf_mx.sum(axis=1, keepdims=True)
+	norm_conf_mx = conf_mx / row_sums
+	np.fill_diagonal(norm_conf_mx, 0)
+	plt.matshow(norm_conf_mx, cmap=plt.cm.gray)
+	plt.show()
+
+	print("precision score: " + str(precision_score(y_test_2, test_predictions, average="weighted")))
+	print("recall_score: " + str(recall_score(y_test_2, test_predictions, average="weighted")))
+	print("f1 score: " + str(f1_score(y_test_2, test_predictions, average="weighted")))
+
 
 def feature_scaling(data):
 	num_pipeline = Pipeline([
@@ -142,50 +177,93 @@ def prepareData():
 	X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.1, random_state=10)
 	return (X_train, X_test, y_train, y_test)
 
-def XGB_modelfit(alg ,useTrainCV=True, cv_folds=5, early_stopping_rounds=50):
+def XGB_modelfit(alg, useTrainCV=True, cv_folds=4, early_stopping_rounds=50):
 	if useTrainCV:
 		xgb_param = alg.get_xgb_params()
-		xgtrain = xgb.DMatrix(X_train, label=y_train)
+		#xgtrain = xgb.DMatrix(X_train_2, label=y_train_2)
+		xgtrain = xgb.DMatrix('train.buffer')
 		cvresult = xgb.cv(xgb_param, xgtrain, num_boost_round=alg.get_params()['n_estimators'], nfold=cv_folds,
-            metrics='merror', early_stopping_rounds=early_stopping_rounds, verbose_eval=False)
+            feval=rmspe_xg, early_stopping_rounds=early_stopping_rounds, verbose_eval=False)
 		alg.set_params(n_estimators=cvresult.shape[0])
     
     #Fit the algorithm on the data
-	alg.fit(X_train, y_train,eval_metric='merror')
+	alg.fit(X_train_2, y_train_2, feval='auc')
         
     #Predict training set:
-	dtrain_predictions = alg.predict(X_train)
-	dtrain_predprob = alg.predict_proba(X_train)[:,1]
+	dtrain_predictions = alg.predict(X_train_2)
+	dtrain_predprob = alg.predict_proba(X_train_2)[:,1]
         
     #Print model report:
 	print("\nModel Report")
-	print("Accuracy : %.4g" % accuracy_score(y_train, dtrain_predictions))
-	#print("AUC Score (Train): %f" % roc_auc_score(y_train, dtrain_predprob))
-                    
-	feat_imp = pd.Series(alg.booster().get_fscore()).sort_values(ascending=False)
-	feat_imp.plot(kind='bar', title='Feature Importances')
-	plt.ylabel('Feature Importance Score')
+	print("Accuracy : %.4g" % accuracy_score(y_train_2, dtrain_predictions))
+	print("AUC Score (Train): %f" % roc_auc_score(y_train_2, dtrain_predprob))
+    
 
 def run_XGB():
 	#Choose all predictors except target & IDcols
 	#predictors = [x for x in train.columns if x not in [target, IDcol]]
 	xgb1 = XGBClassifier(
-	 learning_rate =0.2,
+	 learning_rate =0.5,
 	 n_estimators=10,
-	 max_depth=5,
+	 max_depth=4,
 	 min_child_weight=1,
 	 gamma=0,
 	 subsample=0.8,
 	 colsample_bytree=0.8,
-	 objective= 'multi:softprob',
-	 num_class=6,
+	 objective= 'binary:logistic',
 	 n_jobs=-1,
 	 scale_pos_weight=1,
-	 eval_metric="merror",
 	 seed=27)
 	XGB_modelfit(xgb1)
 	with open('XGBoost.pkl', 'wb') as fid:
 		pickle.dump(xgb1, fid) 
+
+def run_XGB_2():
+	params = {
+		"learning_rate":0.5,
+		"n_estimators":10,
+		"max_depth":4,
+		"min_child_weight":1,
+		"gamma":0,
+		"subsample":0.8,
+		"colsample_bytree":0.8,
+		"objective":'binary:logistic',
+		"n_jobs":-1,
+		"scale_pos_weight":1,
+		"seed":27
+          }
+
+	#xgtrain = xgb.DMatrix(X_train_2, label=y_train_2)
+	#xgtest = xgb.DMatrix(X_test_2, label=y_test_2)
+	xgtrain = xgb.DMatrix('train.buffer')
+	xgtest = xgb.DMatrix('test.buffer')
+	watchlist = [(xgtrain, 'train'),(xgtest, 'eval')]
+	gbm1 = xgb.train(params,
+		xgtrain, 
+	 	evals=watchlist, 
+		early_stopping_rounds=100, 
+		feval=rmspe_xg,
+		verbose_eval=True)
+	with open('XGBoost_2.pkl', 'wb') as fid:
+		pickle.dump(gbm1, fid) 
+
+def graph_xgb_2(gbm):
+	print(gbm.get_fscore())
+	'''
+	plot_importance(gbm)
+	pyplot.show()               
+	feat_imp = pd.Series(gbm.Booster().get_fscore(fmap="xgb.fmap")).sort_values(ascending=False)
+	feat_imp.plot(kind='bar', title='Feature Importances')
+	plt.ylabel('Feature Importance Score')
+	'''
+
+
+def graph_xgb(alg):
+	#xgb.plot_importance(alg)
+	#print(alg.booster().get_fscore())                
+	feat_imp = pd.Series(alg.booster().get_fscore(fmap="xgb.fmap")).sort_values(ascending=False)
+	feat_imp.plot(kind='bar', title='Feature Importances')
+	plt.ylabel('Feature Importance Score')
 
 def run_RF():
 	clf = RandomForestCLF()
@@ -232,6 +310,31 @@ def baseline_prediction():
 	print(non_ones)
 
 
+# Thanks to Chenglong Chen for providing this in the forum
+def ToWeight(y):
+    w = np.zeros(y.shape, dtype=float)
+    ind = y != 0
+    w[ind] = 1./(y[ind]**2)
+    return w
+
+
+def rmspe(yhat, y):
+    w = ToWeight(y)
+    rmspe = np.sqrt(np.mean( w * (y - yhat)**2 ))
+    return rmspe
+
+
+def rmspe_xg(yhat, y):
+    # y = y.values
+    y = y.get_label()
+    y = np.exp(y) - 1
+    yhat = np.exp(yhat) - 1
+    w = ToWeight(y)
+    rmspe = np.sqrt(np.mean(w * (y - yhat)**2))
+    return "rmspe", rmspe
+
+
+
 def feature_importance(clf):
 	for name, score in zip(list(data.columns.values), clf.feature_importances_):
 		if score > .01:
@@ -267,24 +370,37 @@ def test(clf):
 
 #data = load_data()
 
+
 with open('RF.pkl', 'rb') as fid:
 	RF_clf = pickle.load(fid)
 
+'''
 with open('Adaboost.pkl', 'rb') as fid:
 	Adaboost_clf = pickle.load(fid)
 
 '''
-with open('XGBoost.pkl', 'rb') as fid:
-	Adaboost_clf = pickle.load(fid)
-'''
 
-with open('Data.pkl', 'rb') as fid:
+with open('XGBoost.pkl', 'rb') as fid:
+	XGBoost_clf = pickle.load(fid)
+
+with open('XGBoost_2.pkl', 'rb') as fid:
+	XGBoost_clf_2 = pickle.load(fid)
+
+
+with open('data.pkl', 'rb') as fid:
 	data = pickle.load(fid)
 
 X_train, X_test, y_train, y_test = prepareData() 
 y_train_2 = (y_train == 2)
 y_test_2 = (y_test == 2)
+X_train_2 = (X_train == 2)
+X_test_2 = (X_test == 2)
 
+#load new XGBoost data
+#dtrain = xgb.DMatrix(X_train_2, label=y_train_2)
+#dtrain.save_binary("train.buffer")
+#xgtest = xgb.DMatrix(X_test_2, label=y_test_2)
+#xgtest.save_binary("test.buffer")
 
 #-----------------RF-----------------------#
 #run_RF()
@@ -293,6 +409,7 @@ y_test_2 = (y_test == 2)
 #confusion_matrix_implemented(RF_clf)
 #RF_ROC()
 #RF_PRC()
+tune_RF()
 
 #---------------AdaBoost-----------------------#
 #run_AdaBoost()
@@ -302,7 +419,13 @@ y_test_2 = (y_test == 2)
 #run_GradientBoosting()
 
 #--------------------XGBoost---------------------#
-run_XGB()
+#run_XGB()
+#graph_xgb(XGBoost_clf)
+#confusion_matrix_implemented(XGBoost_clf)
+#test(XG)
+
+#run_XGB_2()
+#graph_xgb_2(XGBoost_clf_2)
 
 
 

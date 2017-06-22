@@ -299,7 +299,7 @@ def to_fill_na(df,nan_dict):
 
 
 #####Cleaning Dataset#####
-df1 = import_dataset("data/partial_consolidated_loans.csv")
+df1 = import_dataset("data/consolidated_loans.csv")
 df2 = import_dataset("data/primaryMarketNotes_browseNotes_1-RETAIL.csv")
 merge(clean_dataset(df1), clean_dataset_investable_loans(df2))
 
